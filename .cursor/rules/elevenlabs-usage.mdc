@@ -1,0 +1,286 @@
+# ElevenLabs TTS Usage Rules
+
+## API Key Security
+
+- **NEVER** expose ElevenLabs API key in client-side code
+- **ALWAYS** make TTS requests from server-side API routes
+- Store API key in environment variables only
+
+## Voice Configuration
+
+### Multilingual Voices
+
+```typescript
+// lib/elevenlabs/voices.ts
+export const VOICES = {
+  'en-GB': {
+    id: process.env.ELEVENLABS_VOICE_EN_GB!,
+    name: 'British Female',
+    use: 'General pharmacy assistant'
+  },
+  'es-ES': {
+    id: process.env.ELEVENLABS_VOICE_ES_ES!,
+    name: 'Spanish Female',
+    use: 'Spanish-speaking patients'
+  },
+  'ur-PK': {
+    id: process.env.ELEVENLABS_VOICE_UR_PK!,
+    name: 'Urdu Male',
+    use: 'Urdu-speaking patients'
+  }
+};
+```
+
+### Voice Settings
+
+For pharmacy voice assistant (clarity and trust):
+```typescript
+export const VOICE_SETTINGS = {
+  stability: 0.5,        // Balanced
+  similarityBoost: 0.75, // Clear pronunciation
+  style: 0.3,            // Neutral, professional
+  useSpeakerBoost: true  // Enhanced clarity
+};
+```
+
+For educational videos (engaging but clear):
+```typescript
+export const VIDEO_VOICE_SETTINGS = {
+  stability: 0.6,        // Slightly more stable
+  similarityBoost: 0.8,  // Very clear
+  style: 0.4,            // Slightly more expressive
+  useSpeakerBoost: true
+};
+```
+
+## Streaming vs. File Generation
+
+### Streaming (for real-time voice calls)
+```typescript
+// lib/elevenlabs/stream.ts
+import { ElevenLabsClient } from 'elevenlabs';
+
+export async function streamTTS(text: string, voiceId: string) {
+  const client = new ElevenLabsClient({
+    apiKey: process.env.ELEVENLABS_API_KEY!
+  });
+
+  const audioStream = await client.textToSpeech.stream(voiceId, {
+    text,
+    model_id: 'eleven_turbo_v2', // Fastest for real-time
+    voice_settings: VOICE_SETTINGS
+  });
+
+  return audioStream; // Stream to LiveKit
+}
+```
+
+### File Generation (for videos)
+```typescript
+// lib/elevenlabs/generate.ts
+export async function generateAudioFile(
+  text: string,
+  voiceId: string,
+  language: string
+): Promise<Buffer> {
+  const client = new ElevenLabsClient({
+    apiKey: process.env.ELEVENLABS_API_KEY!
+  });
+
+  const audio = await client.textToSpeech.convert(voiceId, {
+    text,
+    model_id: 'eleven_multilingual_v2', // Better for videos
+    voice_settings: VIDEO_VOICE_SETTINGS
+  });
+
+  return Buffer.from(await audio.arrayBuffer());
+}
+```
+
+## Voice Cloning (Pharmacist-Specific)
+
+### Guidelines
+- Require explicit consent from pharmacist
+- Minimum 1-minute clear audio sample
+- Professional setting (quiet, no background noise)
+- Only for pharmacy-branded educational content
+
+```typescript
+// lib/elevenlabs/voice-cloning.ts
+export async function cloneVoice(
+  name: string,
+  audioSample: File,
+  pharmacistId: string
+): Promise<string> {
+  // Verify consent
+  const consent = await verifyPharmacistConsent(pharmacistId);
+  if (!consent) throw new Error('Consent required for voice cloning');
+
+  const client = new ElevenLabsClient({
+    apiKey: process.env.ELEVENLABS_API_KEY!
+  });
+
+  const voice = await client.voices.add({
+    name,
+    files: [audioSample],
+    description: `Pharmacist voice - ${pharmacistId}`
+  });
+
+  // Store voice ID securely
+  await storeVoiceId(pharmacistId, voice.voice_id);
+
+  return voice.voice_id;
+}
+```
+
+## Text Preprocessing
+
+### Medical Terms
+- Use SSML for pronunciation hints
+- Pre-process drug names (e.g., "nitrofurantoin" → "nye-troe-fyoor-AN-toyn")
+
+```typescript
+// lib/elevenlabs/preprocessing.ts
+export function preprocessMedicalText(text: string): string {
+  const pronunciations: Record<string, string> = {
+    'nitrofurantoin': '<phoneme alphabet="ipa" ph="ˌnaɪtroʊfjʊˈræntəwɪn">nitrofurantoin</phoneme>',
+    'amoxicillin': '<phoneme alphabet="ipa" ph="əˌmɒksɪˈsɪlɪn">amoxicillin</phoneme>',
+    // ... more medical terms
+  };
+
+  let processed = text;
+  for (const [term, ssml] of Object.entries(pronunciations)) {
+    processed = processed.replace(new RegExp(term, 'gi'), ssml);
+  }
+
+  return processed;
+}
+```
+
+## Cost Optimization
+
+### Caching
+- Cache common phrases (greetings, disclaimers)
+- Store generated audio files in R2/S3
+- Reuse voice files for repeated content
+
+```typescript
+// lib/elevenlabs/cache.ts
+import { Redis } from '@upstash/redis';
+
+const redis = new Redis({
+  url: process.env.UPSTASH_REDIS_URL!,
+  token: process.env.UPSTASH_REDIS_TOKEN!
+});
+
+export async function getCachedOrGenerate(
+  text: string,
+  voiceId: string
+): Promise<Buffer> {
+  const cacheKey = `tts:${voiceId}:${hash(text)}`;
+
+  // Check cache
+  const cached = await redis.get(cacheKey);
+  if (cached) return Buffer.from(cached as string, 'base64');
+
+  // Generate
+  const audio = await generateAudioFile(text, voiceId, 'en-GB');
+
+  // Cache for 30 days
+  await redis.setex(cacheKey, 30 * 24 * 60 * 60, audio.toString('base64'));
+
+  return audio;
+}
+```
+
+### Model Selection
+- Use `eleven_turbo_v2` for real-time (fastest, lowest cost)
+- Use `eleven_multilingual_v2` for videos (best quality)
+- Use `eleven_monolingual_v1` for English-only (balance)
+
+## Error Handling
+
+```typescript
+// lib/elevenlabs/client.ts
+export async function safeTTS(text: string, voiceId: string): Promise<Buffer | null> {
+  try {
+    return await generateAudioFile(text, voiceId, 'en-GB');
+  } catch (error) {
+    if (error.status === 429) {
+      // Rate limit - implement backoff
+      await sleep(5000);
+      return safeTTS(text, voiceId);
+    } else if (error.status === 401) {
+      // API key issue
+      logger.error('ElevenLabs API key invalid', { error });
+      // Fallback to basic TTS or escalate
+      return null;
+    } else {
+      logger.error('ElevenLabs TTS failed', { error, text, voiceId });
+      return null;
+    }
+  }
+}
+```
+
+## Monitoring
+
+Track these metrics:
+- Characters processed (for billing)
+- Generation time (latency)
+- Error rate by voice/language
+- Cache hit rate
+
+```typescript
+// lib/elevenlabs/metrics.ts
+export async function trackTTSMetrics(
+  voiceId: string,
+  textLength: number,
+  duration: number,
+  cached: boolean
+) {
+  await trackMetric('elevenlabs.characters', textLength, {
+    voiceId,
+    cached: cached.toString()
+  });
+
+  await trackMetric('elevenlabs.duration', duration, {
+    voiceId
+  });
+}
+```
+
+## Compliance
+
+### Patient Safety
+- Include disclaimers in medication counseling audio
+- Never replace pharmacist consultation for clinical decisions
+- Clear pronunciation of dosage and warnings
+
+### Content Review
+- Pharmacist review required for all educational content
+- Version control for approved scripts
+- Audit trail for voice generation
+
+## Testing
+
+```typescript
+describe('ElevenLabs TTS', () => {
+  it('should generate clear audio for medication name', async () => {
+    const text = preprocessMedicalText('Take nitrofurantoin 100mg twice daily');
+    const audio = await generateAudioFile(text, VOICES['en-GB'].id, 'en-GB');
+
+    expect(audio).toBeDefined();
+    expect(audio.length).toBeGreaterThan(0);
+  });
+
+  it('should cache identical requests', async () => {
+    const text = 'Your prescription is ready';
+    const audio1 = await getCachedOrGenerate(text, VOICES['en-GB'].id);
+    const audio2 = await getCachedOrGenerate(text, VOICES['en-GB'].id);
+
+    expect(audio1).toEqual(audio2);
+    // Second call should be faster (cached)
+  });
+});
+```

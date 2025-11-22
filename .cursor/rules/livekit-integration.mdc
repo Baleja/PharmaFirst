@@ -1,0 +1,153 @@
+# LiveKit Integration Rules
+
+## Security Guidelines
+
+### API Keys and Secrets
+- **NEVER** expose LiveKit API keys or secrets in client-side code
+- **ALWAYS** use server-side API routes to generate access tokens
+- Store credentials in environment variables only
+
+```typescript
+// ✅ GOOD: Server-side token generation
+// app/api/voice/token/route.ts
+export async function POST(req: Request) {
+  const { roomName, participantName } = await req.json();
+
+  const token = new AccessToken(
+    process.env.LIVEKIT_API_KEY!,
+    process.env.LIVEKIT_API_SECRET!,
+    { identity: participantName }
+  );
+
+  token.addGrant({ roomJoin: true, room: roomName });
+  return Response.json({ token: token.toJwt() });
+}
+
+// ❌ BAD: Never do this
+const token = new AccessToken(
+  "hardcoded-key",  // NEVER!
+  "hardcoded-secret" // NEVER!
+);
+```
+
+## Voice Agent Patterns
+
+### Call Handling Flow
+1. Incoming call → Twilio SIP trunk → LiveKit
+2. Create room with unique ID
+3. Join agent to room
+4. Stream audio bidirectionally
+5. Save recording to R2/S3
+6. Clean up room after call ends
+
+### Example Voice Agent Setup
+
+```typescript
+// lib/livekit/voice-agent.ts
+import { Room, RoomEvent } from 'livekit-client';
+
+export class VoiceAgent {
+  private room: Room;
+
+  async connect(token: string) {
+    this.room = new Room();
+
+    this.room.on(RoomEvent.TrackSubscribed, (track, publication, participant) => {
+      if (track.kind === 'audio') {
+        // Handle incoming audio
+        this.processAudio(track);
+      }
+    });
+
+    await this.room.connect(process.env.LIVEKIT_URL!, token);
+  }
+
+  private async processAudio(track: AudioTrack) {
+    // Stream to Whisper for transcription
+    // Process with LLM
+    // Generate TTS response
+  }
+}
+```
+
+## SIP Configuration
+
+### Twilio SIP Trunk Setup
+- Configure inbound SIP URI in LiveKit dashboard
+- Point Twilio trunk to LiveKit SIP endpoint
+- Use E.164 format for phone numbers
+
+### Call Recording
+- Enable egress to S3/R2 for all calls
+- Set retention policy: 7 years (NHS compliance)
+- Use signed URLs for access
+
+```typescript
+// lib/livekit/recording.ts
+export async function startRecording(roomName: string) {
+  const egress = new EgressClient(
+    process.env.LIVEKIT_URL!,
+    process.env.LIVEKIT_API_KEY!,
+    process.env.LIVEKIT_API_SECRET!
+  );
+
+  await egress.startRoomCompositeEgress(roomName, {
+    file: {
+      filepath: `recordings/${roomName}-${Date.now()}.mp3`,
+      s3: {
+        bucket: process.env.R2_BUCKET_NAME!,
+        accessKey: process.env.R2_ACCESS_KEY_ID!,
+        secret: process.env.R2_SECRET_ACCESS_KEY!,
+      }
+    }
+  });
+}
+```
+
+## Error Handling
+
+### Network Failures
+- Implement exponential backoff for reconnection
+- Graceful degradation: offer SMS fallback
+- Log all connection failures for debugging
+
+### Call Quality Monitoring
+- Track packet loss and jitter
+- Monitor latency (target: <150ms)
+- Alert on quality degradation
+
+## Testing
+
+### Local Development
+- Use LiveKit Cloud or local LiveKit server
+- Mock SIP calls with LiveKit CLI
+- Test with various network conditions
+
+### Integration Tests
+```typescript
+describe('Voice Agent', () => {
+  it('should handle incoming call', async () => {
+    const agent = new VoiceAgent();
+    await agent.connect(testToken);
+
+    // Simulate incoming audio
+    // Assert transcription occurs
+    // Assert LLM response generated
+    // Assert TTS played back
+  });
+});
+```
+
+## Performance Guidelines
+
+- Keep room creation under 500ms
+- Audio latency target: <150ms end-to-end
+- Minimize token generation time (<50ms)
+- Use connection pooling for API calls
+
+## Compliance
+
+- Ensure consent message played before recording
+- Store consent flag in CallSession record
+- Encrypt recordings at rest
+- Use signed URLs with 60-min expiry for playback
