@@ -56,3 +56,6 @@ logs/
 
 # OS
 Thumbs.db
+
+# Google Service Account (never commit!)
+google-service-account.json
