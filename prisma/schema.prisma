@@ -1,0 +1,191 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Organization {
+  id              String   @id @default(cuid())
+  name            String
+  odsCode         String?  @unique // NHS ODS code
+  address         Json?              // Structured address
+  phoneNumbers    String[]           // Primary, overflow numbers
+  timezone        String   @default("Europe/London")
+  region          String?             // NHS region
+  settings        Json?               // Pharmacy-specific config
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  users           User[]
+  callSessions    CallSession[]
+  consultations   Consultation[]
+  pmrIntegrations PMRIntegration[]
+}
+
+model User {
+  id              String   @id @default(cuid())
+  email           String   @unique
+  name            String
+  role            UserRole            // OWNER, PHARMACIST, STAFF, ADMIN
+  gphcNumber      String?             // GPhC registration (pharmacists)
+  orgId           String
+  organization    Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  consultations   Consultation[]
+  auditLogs       AuditLog[]
+}
+
+enum UserRole {
+  OWNER
+  PHARMACIST
+  STAFF
+  ADMIN
+}
+
+model Patient {
+  id                 String   @id @default(cuid())
+  name               String
+  dob                DateTime
+  phone              String
+  email              String?
+  preferredLanguage  String   @default("en-GB")
+  nhsNumber          String?  @unique
+  consentFlags       Json?              // Voice recording, SMS, video
+
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  callSessions       CallSession[]
+  consultations      Consultation[]
+}
+
+model CallSession {
+  id              String   @id @default(cuid())
+  orgId           String
+  organization    Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  patientId       String?
+  patient         Patient? @relation(fields: [patientId], references: [id], onDelete: SetNull)
+
+  incomingNumber  String
+  direction       String              // inbound, outbound
+  status          CallStatus
+  startTime       DateTime @default(now())
+  endTime         DateTime?
+  duration        Int?                // seconds
+
+  transcriptId    String?
+  transcript      Json?               // Full conversation transcript
+  recordingUrl    String?             // Signed R2/S3 URL
+
+  resolution      String?             // prescription_status, triage, escalation
+  escalatedAt     DateTime?
+  escalatedReason String?
+
+  metadata        Json?               // Intent, tools used, costs, language detected
+
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+enum CallStatus {
+  RINGING
+  IN_PROGRESS
+  COMPLETED
+  FAILED
+  ESCALATED
+}
+
+model Consultation {
+  id                  String   @id @default(cuid())
+  orgId               String
+  organization        Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  patientId           String
+  patient             Patient @relation(fields: [patientId], references: [id], onDelete: Cascade)
+
+  type                PharmacyFirstCondition
+  triageData          Json                // Structured triage responses
+  redFlags            String[]
+
+  pharmacistId        String?
+  pharmacist          User? @relation(fields: [pharmacistId], references: [id], onDelete: SetNull)
+
+  documentationStatus DocumentationStatus
+  nhsRef              String?             // PharmOutcomes claim ID
+  submittedAt         DateTime?
+
+  followUpScheduled   DateTime?
+  followUpCompleted   DateTime?
+  followUpOutcome     String?
+
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+}
+
+enum PharmacyFirstCondition {
+  ACUTE_OTITIS_MEDIA
+  IMPETIGO
+  INFECTED_INSECT_BITE
+  SHINGLES
+  SINUSITIS
+  SORE_THROAT
+  UTI_WOMEN
+}
+
+enum DocumentationStatus {
+  DRAFT
+  PENDING_APPROVAL
+  APPROVED
+  SUBMITTED
+  REJECTED
+}
+
+model PMRIntegration {
+  id              String   @id @default(cuid())
+  orgId           String
+  organization    Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  provider        String              // "PMR1", "PharmacyManager", etc.
+  credentials     String              // Encrypted API keys/tokens
+  mappedFields    Json?               // Field mapping config
+
+  status          IntegrationStatus
+  lastSyncedAt    DateTime?
+
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+enum IntegrationStatus {
+  PENDING
+  ACTIVE
+  FAILED
+  DISABLED
+}
+
+model AuditLog {
+  id              String   @id @default(cuid())
+  userId          String?
+  user            User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  action          String              // call.started, triage.completed, etc.
+  resourceType    String              // CallSession, Consultation, etc.
+  resourceId      String
+  details         Json?
+
+  ipAddress       String?
+  userAgent       String?
+
+  timestamp       DateTime @default(now())
+}
+

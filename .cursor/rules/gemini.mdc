@@ -1,0 +1,133 @@
+# Gemini Realtime Integration Rules
+
+## API Configuration
+
+### Environment Variables
+- **GEMINI_API_KEY** - Required for all Gemini API calls
+- Store in `.env` file, never commit to repository
+- Use server-side only, never expose to client
+
+### Model Selection
+- Use `gemini-2.0-realtime-exp` for voice conversations
+- Fallback to `gemini-1.5-pro` if realtime unavailable
+- Always specify model version explicitly
+
+## Voice Configuration
+
+### Language Auto-Detection
+```typescript
+// ✅ GOOD: Enable auto-detection with fallback
+const config = {
+  model: "gemini-2.0-realtime-exp",
+  voice: {
+    autoDetectLanguage: true,
+    fallbackLanguage: "en-GB",
+    style: "warm",
+    speed: 1.0,
+  }
+};
+```
+
+### Supported Languages
+- English (UK): `en-GB` (default)
+- Urdu: `ur`
+- Punjabi: `pa`
+- Polish: `pl`
+- Spanish: `es`
+
+### Voice Style Guidelines
+- **warm**: For patient interactions (default)
+- **professional**: For clinical documentation
+- **friendly**: For follow-up communications
+
+## System Prompts
+
+### Best Practices
+- Keep system prompts concise but comprehensive
+- Include safety rules at the top
+- Specify language handling explicitly
+- Define escalation triggers clearly
+
+### Example Structure
+```typescript
+const systemPrompt = `
+1. Safety Rules
+   - Never diagnose
+   - Escalate red flags immediately
+   
+2. Language Handling
+   - Respond in caller's first language
+   - Store language preference
+   
+3. Workflow
+   - Identity verification
+   - Symptom assessment
+   - Follow-up selection
+`;
+```
+
+## Error Handling
+
+### Connection Failures
+- Implement exponential backoff for reconnection
+- Log all connection errors with context
+- Provide graceful degradation (fallback to text)
+
+### API Rate Limits
+- Monitor token usage per call
+- Implement rate limiting per organization
+- Alert on approaching limits
+
+## Cost Management
+
+### Token Tracking
+- Log input/output tokens for each call
+- Track costs per pharmacy organization
+- Set budget alerts
+
+### Optimization
+- Use streaming responses when possible
+- Cache common responses
+- Minimize system prompt length
+
+## Testing
+
+### Local Development
+- Use Gemini API test mode when available
+- Mock responses for unit tests
+- Test language detection with sample audio
+
+### Integration Tests
+```typescript
+describe('Gemini Realtime', () => {
+  it('should detect language from first utterance', async () => {
+    const audio = loadTestAudio('urdu_greeting.wav');
+    const detection = await detectLanguage(audio);
+    expect(detection.language).toBe('ur');
+  });
+});
+```
+
+## Security
+
+### Data Privacy
+- Never log full transcripts with PII
+- Redact NHS numbers from logs
+- Encrypt stored transcripts
+
+### API Key Security
+- Rotate keys regularly
+- Use different keys per environment
+- Monitor for unauthorized usage
+
+## Performance
+
+### Latency Targets
+- First response: < 2 seconds
+- Subsequent responses: < 1 second
+- Audio streaming: < 500ms buffer
+
+### Optimization Tips
+- Stream audio in chunks
+- Use connection pooling
+- Cache language detection results

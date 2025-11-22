@@ -1,0 +1,131 @@
+# Patient Safety Rules
+
+## Clinical Safety Principles
+
+### Red Flag Escalation
+- **IMMEDIATE** escalation required for any red flag
+- Never attempt to triage when red flags present
+- Connect to pharmacist within 30 seconds
+
+### Red Flag List (UTI)
+1. High temperature/fever
+2. Pain in sides/back (kidney area)
+3. Nausea or vomiting
+4. Blood in urine
+5. Symptoms > 7 days
+6. Pregnancy
+7. Diabetes or immunocompromised conditions
+
+### Escalation Protocol
+```typescript
+// ✅ GOOD: Immediate escalation
+if (redFlags.length > 0) {
+  await escalateToPharmacist(callSessionId, redFlags);
+  await sendMessage("I need to connect you with our pharmacist right away.");
+  return; // Stop triage immediately
+}
+```
+
+## Documentation Requirements
+
+### Mandatory Fields
+- Patient identity (name + DOB)
+- All symptoms discussed
+- Red flags checked
+- Follow-up preference
+- Delivery/pickup choice
+
+### Audit Trail
+- Log all clinical decisions
+- Record escalation reasons
+- Track pharmacist review times
+- Store complete conversation transcripts
+
+## Consent Management
+
+### Voice Recording
+- Always play consent message before recording
+- Store consent flag in CallSession
+- Allow patient to opt-out (still provide service)
+
+### Data Sharing
+- Never share patient data without consent
+- Encrypt all stored recordings
+- Implement data retention policies (7 years for NHS)
+
+## Error Handling
+
+### Clinical Errors
+- If uncertain → escalate
+- If system error → offer human fallback
+- Never guess or assume
+
+### Technical Failures
+- Graceful degradation to SMS
+- Offer callback option
+- Never leave patient without support
+
+## Validation Rules
+
+### Identity Verification
+- Require full name AND date of birth
+- Verify against patient records if available
+- Allow 3 attempts before escalation
+
+### Symptom Assessment
+- Ask all required questions
+- Don't skip red flag checks
+- Confirm understanding before proceeding
+
+## Pharmacist Review
+
+### Approval Workflow
+- All triage outcomes require pharmacist approval
+- Escalated cases reviewed immediately
+- Standard cases reviewed within 2 hours
+
+### Documentation Standards
+- Complete triage data required
+- Clear reasoning for decisions
+- Patient preferences documented
+
+## Compliance
+
+### NHS Pharmacy First
+- Follow condition-specific protocols
+- Document per NHS requirements
+- Submit to PharmOutcomes within 24 hours
+
+### GDPR Compliance
+- Right to access data
+- Right to erasure (with NHS retention exceptions)
+- Data portability
+
+## Testing
+
+### Safety Test Cases
+```typescript
+describe('Patient Safety', () => {
+  it('should escalate immediately on red flag', async () => {
+    const triage = processUTITriage(orgId, patientId, {
+      symptoms: [],
+      redFlags: [{ type: 'high_temperature', present: true }],
+    });
+    expect(triage.result.recommendation).toBe('escalate');
+    expect(triage.needsApproval).toBe(false); // Immediate, no approval needed
+  });
+});
+```
+
+## Monitoring
+
+### Safety Metrics
+- Red flag detection rate
+- Escalation response time
+- Pharmacist review time
+- Patient outcome tracking
+
+### Alerts
+- Alert on multiple red flags
+- Alert on failed escalations
+- Alert on missing documentation
